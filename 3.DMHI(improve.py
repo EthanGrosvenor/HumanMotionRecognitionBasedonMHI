@@ -1,6 +1,6 @@
 # hmmTrainTest.py
 
-__author__ = 'calp'
+__author__ = 'Ethan'
 
 import argparse
 import cv2
