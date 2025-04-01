@@ -1,4 +1,4 @@
-# hmmTrainTest.py
+# Temporal Pyramid MHI
 __author__ = 'Ethan'
 
 import argparse

@@ -1,5 +1,4 @@
-# hmmTrainTest.py
-
+# Directional Motion Energy Images (DMEI)
 __author__ = 'Ethan'
 
 import argparse

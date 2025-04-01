@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+# Optical Flow-Weighted MHI
 
 __author__ = 'Ethan'
 

@@ -1,7 +1,5 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
-__author__ = 'Ethan + upgrade by Temporal Pyramid'
+# Combined Optical Flow Weighted and Temporal Pyramid MHI
+__author__ = 'Ethan'
 
 import argparse
 import cv2
@@ -16,7 +14,8 @@ import matplotlib.pyplot as plt
 import os
 import imageio
 
-# 自定义工具，用于HMM初始化和绘制混淆矩阵，需要包含 initByBakis 和 plotConfusionMatrix
+# Custom utilities for HMM initialization and drawing the confusion matrix.
+# These utilities must include functions: initByBakis and plotConfusionMatrix.
 import hmm_util
 
 warnings.filterwarnings('ignore')
@@ -24,38 +23,40 @@ warnings.filterwarnings('ignore')
 
 class VideoRecognizer:
     def __init__(self, args):
-        self.predicted = []  # 记录预测类别
-        self.expected = []   # 记录真实类别
-        self.args = args     # 命令行参数
-        self.model = dict()  # 按类别存放HMM模型
-        self.fullDataTrainHmm = {}  # 训练在每个类别全部数据上的HMM，用于打分
+        self.predicted = []  # Record predicted categories
+        self.expected = []   # Record actual categories
+        self.args = args     # Command line arguments
+        self.model = dict()  # Store HMM models by category
+        self.fullDataTrainHmm = {}  # HMM trained on all data for each category, used for scoring
         self.categories = ['bend', 'jack', 'jump', 'pjump', 'run', 'side', 'skip', 'walk', 'wave1', 'wave2']
         self.persons = ['daria_', 'denis_', 'eli_', 'ido_', 'ira_', 'lena_', 'lyova_', 'moshe_', 'shahar_']
-        self.vis_dir = 'visualizations'  # 用于存放可视化gif
+        self.vis_dir = 'visualizations'  # Directory to store visualization GIFs
         os.makedirs(self.vis_dir, exist_ok=True)
 
     def extractFeature(self, video):
         """
-        普通特征：对每帧做阈值化、裁剪后，提取 Hu 矩或行列投影。
+        Standard feature extraction: for each frame, apply thresholding and cropping,
+        then extract Hu moments or row-column projections.
         """
         images = []
         for x in range(video.shape[2]):
             gray = video[:, :, x]
-            gray = gray[5:-5, 10:-10]  # 裁边
+            gray = gray[5:-5, 10:-10]  # Crop borders
             gray = cv2.threshold(gray, 0.5, 255, cv2.THRESH_BINARY)[1]
             res = cv2.resize(gray, None, fx=self.args.resize, fy=self.args.resize, interpolation=cv2.INTER_CUBIC)
             if self.args.feature_type == 'Hu':
                 hu = cv2.HuMoments(cv2.moments(res)).flatten()
                 images.append(hu)
             else:
-                # 行列投影
+                # Row and column projection
                 images.append(np.append(res.sum(axis=0), res.sum(axis=1)))
         return images
 
     def extractMhiFeature(self, video, save_gif_path=None):
         """
-        光流加权的整段 MHI 计算。
-        若使用光流，则在每帧 silhouettes 乘以 (1 + 光流幅值归一化) 再累加到 MHI。
+        Compute Motion History Image (MHI) over the entire video with optical flow weighting.
+        If optical flow is used, each frame's silhouette is multiplied by (1 + normalized optical flow magnitude)
+        before being accumulated to the MHI.
         """
         previous_frame = None
         mhi = None
@@ -69,13 +70,13 @@ class VideoRecognizer:
             gray_bin = cv2.threshold(gray, 0.5, 255, cv2.THRESH_BINARY)[1].astype(np.uint8)
 
             if previous_frame is None:
-                # 初始化 MHI
+                # Initialize MHI
                 mhi = np.zeros(gray_bin.shape, dtype=np.float32)
                 previous_frame = gray_bin.copy()
                 previous_for_flow = gray.copy().astype(np.uint8)
                 continue
 
-            # silhouette = 前一帧与当前帧做差
+            # Compute silhouette: difference between previous frame and current frame
             silhouette = cv2.addWeighted(previous_frame, -1.0, gray_bin, 1.0, 0)
 
             if self.args.use_optical_flow:
@@ -96,7 +97,7 @@ class VideoRecognizer:
 
             previous_frame = gray_bin.copy()
 
-            # 缩放并提取特征
+            # Resize and extract features
             res = cv2.resize(mhi, None, fx=self.args.resize, fy=self.args.resize, interpolation=cv2.INTER_CUBIC)
             if self.args.feature_type == 'Hu':
                 hu = cv2.HuMoments(cv2.moments(res)).flatten()
@@ -104,13 +105,13 @@ class VideoRecognizer:
             else:
                 images.append(np.append(res.sum(axis=0), res.sum(axis=1)))
 
-            # 保存gif帧
+            # Save frame for GIF
             if save_gif_path:
                 gif_frame = cv2.resize(mhi, (100, 100))
                 gif_frame_norm = cv2.normalize(gif_frame, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
                 frames_for_gif.append(gif_frame_norm)
 
-        # 导出gif
+        # Export GIF
         if save_gif_path and len(frames_for_gif) > 0:
             imageio.mimsave(save_gif_path, frames_for_gif, fps=5)
 
@@ -118,13 +119,14 @@ class VideoRecognizer:
 
     def extractMhiFeatureTemporalPyramid(self, video, save_gif_path=None):
         """
-        光流加权 + Temporal Pyramid MHI：
-        将视频在时间上分段，每段从零开始单独计算光流加权 MHI，再把各段帧级特征依次拼接。
+        Optical flow weighted + Temporal Pyramid MHI:
+        Segment the video temporally, compute an optical flow weighted MHI for each segment from scratch,
+        and then concatenate the per-frame features in sequence.
         """
         total_frames = video.shape[2]
         segment_count = self.args.temporal_segments
 
-        # 若只有1段，则退化为原先的整段MHI
+        # If only one segment is specified, fall back to the original whole-video MHI
         if segment_count <= 1:
             return self.extractMhiFeature(video, save_gif_path=save_gif_path)
 
@@ -134,15 +136,15 @@ class VideoRecognizer:
 
         for seg_idx in range(segment_count):
             start_frame = seg_idx * segment_length
-            # 最后一段包含多余帧
+            # Last segment includes any extra frames
             end_frame = (seg_idx + 1) * segment_length if seg_idx < segment_count - 1 else total_frames
 
-            # 对该段重新初始化
-            mhi = np.zeros((video.shape[0]-10, video.shape[1]-20), dtype=np.float32)
+            # Reinitialize for this segment
+            mhi = np.zeros((video.shape[0] - 10, video.shape[1] - 20), dtype=np.float32)
             previous_frame = None
             previous_for_flow = None
 
-            # 依次处理当前段内的每帧
+            # Process each frame in the current segment sequentially
             for x in range(start_frame, end_frame):
                 gray = video[:, :, x]
                 gray = gray[5:-5, 10:-10]
@@ -173,7 +175,7 @@ class VideoRecognizer:
 
                 previous_frame = gray_bin.copy()
 
-                # 缩放并提取特征
+                # Resize and extract features
                 res = cv2.resize(mhi, None, fx=self.args.resize, fy=self.args.resize, interpolation=cv2.INTER_CUBIC)
                 if self.args.feature_type == 'Hu':
                     hu = cv2.HuMoments(cv2.moments(res)).flatten()
@@ -181,13 +183,13 @@ class VideoRecognizer:
                 else:
                     images.append(np.append(res.sum(axis=0), res.sum(axis=1)))
 
-                # 仅在第 0 段保存gif做示例
+                # Save GIF frames only for the first segment as an example
                 if save_gif_path and seg_idx == 0:
                     gif_frame = cv2.resize(mhi, (100, 100))
                     gif_frame_norm = cv2.normalize(gif_frame, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
                     frames_for_gif.append(gif_frame_norm)
 
-        # 导出gif仅包含第1段（可根据需求调整）
+        # Export GIF containing only the first segment (can be adjusted as needed)
         if save_gif_path and frames_for_gif:
             imageio.mimsave(save_gif_path, frames_for_gif, fps=5)
 
@@ -195,8 +197,8 @@ class VideoRecognizer:
 
     def loadVideos(self):
         """
-        加载所有视频并拆分为（类别、人员）。
-        对每个类别执行留一法 (LOO) 训练，并存储模型信息。
+        Load all videos and split them by category and person.
+        Perform leave-one-out (LOO) training for each category and store the model information.
         """
         mat_contents = sio.loadmat('data/original_masks.mat')
         mat_contents = mat_contents['original_masks']
@@ -206,11 +208,11 @@ class VideoRecognizer:
             for person in self.persons:
                 save_path = os.path.join(self.vis_dir, f'{person}{category_name}.gif')
 
-                # 特殊情况: lena_ 在 run/skip/walk 上有 2 个样本
+                # Special case: 'lena_' has 2 samples for run/skip/walk categories
                 if person == 'lena_' and category_name in ['run', 'skip', 'walk']:
                     for i in ['1', '2']:
                         video = mat_contents[person + category_name + i][0][0]
-                        # 若设置了mhi，则进一步判断是否多段
+                        # If MHI is enabled, further check if temporal segmentation is used
                         if self.args.mhi:
                             data = self.extractMhiFeatureTemporalPyramid(video, save_gif_path=save_path if i == '1' else None)
                         else:
@@ -224,9 +226,9 @@ class VideoRecognizer:
                         data = self.extractFeature(video)
                     images.append(data)
 
-            # 该类别下的所有数据已提取完成
+            # All data for this category have been extracted
             if len(images) != 0:
-                # 先用所有数据训练一个完整模型，用于后续打分
+                # First, train a complete model using all data for this category for subsequent scoring
                 loo = LeaveOneOut()
                 self.fullDataTrainHmm[category_name], _, _ = self.train(images)
 
@@ -234,7 +236,7 @@ class VideoRecognizer:
                     'hmm': [], 'std_scale': [], 'std_scale1': [], 'data': []
                 }
 
-                # 再执行留一交叉验证
+                # Then perform leave-one-out cross validation
                 for train_idx, test_idx in loo.split(range(len(images))):
                     train_data = [images[i] for i in train_idx]
                     test_data = [images[i] for i in test_idx]
@@ -249,7 +251,7 @@ class VideoRecognizer:
 
     def train(self, images):
         """
-        训练HMM/GMMHMM，并可进行PCA/ICA/StandardScaler/Normalizer等预处理。
+        Train an HMM/GMMHMM with optional preprocessing such as PCA/ICA/StandardScaler/Normalizer.
         """
         scaled_images = []
         length = []
@@ -257,7 +259,7 @@ class VideoRecognizer:
             scaled_images.extend(file)
             length.append(len(file))
 
-        # 根据参数选择预处理方式
+        # Select preprocessing method based on parameters
         std_scale1 = None
         if self.args.preprocess_method == "PCA":
             std_scale1 = preprocessing.StandardScaler()
@@ -270,7 +272,7 @@ class VideoRecognizer:
         else:
             std_scale = preprocessing.Normalizer()
 
-        # 若做多级预处理（例如先做标准化再做PCA）
+        # If performing multi-stage preprocessing (e.g., StandardScaler followed by PCA)
         if std_scale1 is not None:
             std_scale1.fit(scaled_images)
             scaled_images = std_scale1.transform(scaled_images)
@@ -278,7 +280,7 @@ class VideoRecognizer:
         std_scale.fit(scaled_images)
         scaled_images = std_scale.transform(scaled_images)
 
-        # 若 gmm_state_number=1，则用 GaussianHMM，否则用 GMMHMM
+        # If gmm_state_number equals 1, use GaussianHMM; otherwise, use GMMHMM
         if self.args.gmm_state_number == 1:
             markov_model = hmm.GaussianHMM(n_components=self.args.state_number, n_iter=10, random_state=55)
         else:
@@ -289,11 +291,11 @@ class VideoRecognizer:
                 random_state=55
             )
 
-        # 如果指定了 left-to-right，则初始化转移矩阵
+        # If left-to-right is specified, initialize the transition matrix
         if self.args.left2Right:
             startprob, transmat = hmm_util.initByBakis(self.args.state_number, 2)
-            markov_model.init_params = "cm"  # 只初始化 均值+协方差
-            markov_model.params = "cmt"     # 训练过程中更新初始+转移
+            markov_model.init_params = "cm"  # Only initialize mean and covariance
+            markov_model.params = "cmt"     # Update initial and transition parameters during training
             markov_model.startprob_ = startprob
             markov_model.transmat_ = transmat
 
@@ -301,10 +303,10 @@ class VideoRecognizer:
                 if np.sum(markov_model.transmat_[i]) == 0:
                     markov_model.transmat_[i, i] = 1.0
 
-        # 训练HMM
+        # Train the HMM
         markov_model.fit(scaled_images, length)
 
-        # 确保转移矩阵每行归一化
+        # Ensure each row of the transition matrix is normalized
         for i in range(markov_model.transmat_.shape[0]):
             row_sum = np.sum(markov_model.transmat_[i])
             if row_sum == 0:
@@ -316,24 +318,25 @@ class VideoRecognizer:
 
     def testLoaded(self):
         """
-        使用loadVideos中保存的模型和预处理器，对每个类别的测试视频进行预测。
-        执行滑动窗口，在所有类别模型中选取得分最高者作为预测类别。
+        Using the models and preprocessors saved in loadVideos,
+        predict the category for each test video.
+        A sliding window is applied and the category with the highest score among all models is chosen as the prediction.
         """
         for category in self.categories:
             for loo_index, data_list in enumerate(self.model[category]['data']):
                 for data in data_list:
-                    # 还原和训练时相同的预处理
+                    # Apply the same preprocessing as in training
                     if self.model[category]['std_scale1'][loo_index] is not None:
                         data = self.model[category]['std_scale1'][loo_index].transform(data)
                     data = self.model[category]['std_scale'][loo_index].transform(data)
 
-                    # 滑窗预测
+                    # Sliding window prediction
                     for index in range(len(data) - self.args.window):
                         image = data[index: index + self.args.window]
                         max_score = self.model[category]['hmm'][loo_index].score(image)
                         predictedCategory = category
 
-                        # 和其它类别模型比较
+                        # Compare with models from other categories
                         for testedCategory in self.categories:
                             if testedCategory != category:
                                 score = self.fullDataTrainHmm[testedCategory].score(image)
@@ -345,7 +348,7 @@ class VideoRecognizer:
                         self.predicted.append(predictedCategory)
                         print(f"Actual: {category}, Predicted: {predictedCategory}, Match: {category == predictedCategory}")
 
-        # 最终分类结果汇总
+        # Final classification summary
         print("Classification report:\n", metrics.classification_report(self.expected, self.predicted))
         cm = metrics.confusion_matrix(self.expected, self.predicted)
         print("Confusion matrix:\n", cm)
@@ -355,7 +358,7 @@ class VideoRecognizer:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    # 原有参数
+    # Original arguments
     parser.add_argument('-f', '--feature-type', type=str, default='Hu',
                         help='Feature type: Hu or row-column projection.')
     parser.add_argument('-g', '--gmm-state-number', type=int, default=1,
@@ -377,7 +380,7 @@ if __name__ == "__main__":
     parser.add_argument('--use-optical-flow', dest='use_optical_flow', action='store_true',
                         help='Apply optical flow magnitude weighting in MHI.')
 
-    # 新增参数：时间金字塔分段数
+    # New parameter: number of temporal segments for the MHI.
     parser.add_argument('--temporal-segments', type=int, default=1,
                         help='Number of temporal segments for the MHI. >1 enables Temporal Pyramid MHI.')
 
