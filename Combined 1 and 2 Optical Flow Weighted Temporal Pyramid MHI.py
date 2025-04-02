@@ -1,5 +1,4 @@
 # Combined Optical Flow Weighted and Temporal Pyramid MHI
-__author__ = 'Ethan'
 
 import argparse
 import cv2
@@ -13,9 +12,6 @@ from sklearn.decomposition import FastICA, PCA
 import matplotlib.pyplot as plt
 import os
 import imageio
-
-# Custom utilities for HMM initialization and drawing the confusion matrix.
-# These utilities must include functions: initByBakis and plotConfusionMatrix.
 import hmm_util
 
 warnings.filterwarnings('ignore')
@@ -119,9 +115,9 @@ class VideoRecognizer:
 
     def extractMhiFeatureTemporalPyramid(self, video, save_gif_path=None):
         """
-        Optical flow weighted + Temporal Pyramid MHI:
-        Segment the video temporally, compute an optical flow weighted MHI for each segment from scratch,
-        and then concatenate the per-frame features in sequence.
+        Optical flow weighted + Temporal Pyramid MHI
+        Segment the video temporally, compute an optical flow weighted MHI for each segment from scratch
+        and then concatenate the per-frame features in sequence
         """
         total_frames = video.shape[2]
         segment_count = self.args.temporal_segments

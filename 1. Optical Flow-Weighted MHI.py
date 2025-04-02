@@ -1,6 +1,5 @@
 # Optical Flow-Weighted MHI
 
-__author__ = 'Ethan'
 
 import argparse
 import cv2

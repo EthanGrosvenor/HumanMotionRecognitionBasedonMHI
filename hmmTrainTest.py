@@ -1,5 +1,4 @@
 # base version by MHI
-__author__ = 'calp'
 
 
 import argparse

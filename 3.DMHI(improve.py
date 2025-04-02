@@ -1,5 +1,4 @@
 # Directional Motion Energy Images (DMEI)
-__author__ = 'Ethan'
 
 import argparse
 import cv2
