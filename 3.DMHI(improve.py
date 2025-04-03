@@ -1,4 +1,4 @@
-# Directional Motion Energy Images (DMEI)
+# Directional Motion Energy Images (DMHI)
 
 import argparse
 import cv2
